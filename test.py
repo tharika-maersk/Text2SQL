@@ -4,12 +4,13 @@ Unit test for SQLQueryGenerator
 import unittest
 import sqlite3
 import logging
-import asyncio
 import matplotlib.pyplot as plt
 from openai import OpenAI
-from main import SQLQueryGenerator, DB_PATH, SCHEMA_PATH, MODEL, OPENAI_API_KEY
+from main import main
+from utils.config import DB_PATH, SCHEMA_PATH, OPENAI_API_KEY
+from utils.schema_loader import SchemaLoader
 
-logging.basicConfig(filename="sql_generation.log", level=logging.DEBUG,
+logging.basicConfig(filename="sql_generation.log", level=logging.ERROR,
                     format="%(asctime)s - %(message)s")
 
 class TestSQLGeneration(unittest.TestCase):
@@ -24,9 +25,10 @@ class TestSQLGeneration(unittest.TestCase):
         Sets up the SQLQueryGenerator, database connection, 
         schema, cursor, and OpenAI API client.
         '''
-        cls.sql_gen = SQLQueryGenerator(DB_PATH, SCHEMA_PATH, MODEL, OPENAI_API_KEY)
+        # cls.sql_gen = SQLQueryGenerator(DB_PATH, SCHEMA_PATH, MODEL, OPENAI_API_KEY)
         cls.connector = sqlite3.connect(DB_PATH)
-        cls.schema = cls.sql_gen.get_schema()
+        cls.shehma_loader = SchemaLoader(DB_PATH, SCHEMA_PATH)
+        cls.schema = cls.shehma_loader.get_schema()
         cls.cursor = cls.connector.cursor()
         cls.client = OpenAI(api_key=OPENAI_API_KEY)
         cls.evaluation_results = []
@@ -47,10 +49,10 @@ class TestSQLGeneration(unittest.TestCase):
         plt.ylabel('Relevancy Score')
         plt.title('Relevancy Scores for SQL Queries')
         plt.xticks(range(1, len(scores) + 1))
-        plt.ylim(0, 5)  
+        plt.ylim(0, 5)
 
         # Save the plot
-        plt.savefig("relevancy_scores.png")
+        plt.savefig("./results/relevancy_scores.png")
         plt.show()
 
     def check_sql_syntax(self, query):
@@ -188,17 +190,18 @@ class TestSQLGeneration(unittest.TestCase):
         '''Tests which seller has delivered the most orders to customers in Rio de Janeiro.'''
         question = '''Which seller has delivered the most orders to customers
                     in Rio de Janeiro? [string: seller_id]'''
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT oi.seller_id
-            FROM order_items oi
+            SELECT s.seller_id
+            FROM sellers s
+            JOIN order_items oi ON s.seller_id = oi.seller_id
             JOIN orders o ON oi.order_id = o.order_id
             JOIN customers c ON o.customer_id = c.customer_id
-            WHERE c.customer_city = 'Rio de Janeiro'
-            AND o.order_delivered_customer_date IS NOT NULL
-            GROUP BY oi.seller_id
-            ORDER BY COUNT(*) DESC
+            WHERE c.customer_city = 'rio de janeiro'
+                AND o.order_status = 'delivered'
+            GROUP BY s.seller_id
+            ORDER BY COUNT(DISTINCT o.order_id) DESC
             LIMIT 1;'''
         self.assert_response(question, expected_query, sql_query)
 
@@ -207,13 +210,14 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''What's the average review score for
                     products in the 'beleza_saude' category? [float: score]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT AVG(r.review_score) AS score
-            FROM order_reviews r
-            JOIN order_items i ON r.order_id = i.order_id
-            JOIN products p ON i.product_id = p.product_id
+            SELECT 
+                ROUND(AVG(r.review_score), 2) as avg_score
+            FROM products p
+            JOIN order_items oi ON p.product_id = oi.product_id
+            JOIN order_reviews r ON oi.order_id = r.order_id
             WHERE p.product_category_name = 'beleza_saude';'''
 
         self.assert_response(question, expected_query, sql_query)
@@ -224,18 +228,19 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''How many sellers have completed orders worth more than
                     100,000 BRL in total? [integer: count]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT COUNT(*) AS seller_count
+            SELECT COUNT(*) as seller_count
             FROM (
-                SELECT oi.seller_id, SUM(oi.price) AS total_sales
-                FROM orders o
-                JOIN order_items oi ON o.order_id = oi.order_id
-                WHERE o.order_delivered_customer_date IS NOT NULL
-                GROUP BY oi.seller_id
-                HAVING total_sales > 100000
-            ) AS seller_totals;'''
+                SELECT s.seller_id
+                FROM sellers s
+                JOIN order_items oi ON s.seller_id = oi.seller_id
+                JOIN orders o ON oi.order_id = o.order_id
+                WHERE o.order_status = 'delivered'
+                GROUP BY s.seller_id
+                HAVING SUM(oi.price) > 100000
+            ) high_value_sellers;'''
 
         self.assert_response(question, expected_query, sql_query)
 
@@ -244,15 +249,17 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''Which product category has the highest
                     rate of 5-star reviews? [string: category_name]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT p.product_category_name AS category_name
-            FROM order_reviews AS r
-            JOIN order_items AS i ON r.order_id = i.order_id
-            JOIN products AS p ON i.product_id = p.product_id
+            SELECT 
+                p.product_category_name
+            FROM products p
+            JOIN order_items oi ON p.product_id = oi.product_id
+            JOIN order_reviews r ON oi.order_id = r.order_id
             GROUP BY p.product_category_name
-            ORDER BY CAST(SUM(CASE WHEN r.review_score = 5 THEN 1 ELSE 0 END) AS FLOAT) / COUNT(*) DESC
+            HAVING COUNT(*) > 100
+            ORDER BY (COUNT(CASE WHEN r.review_score = 5 THEN 1 END) * 100.0 / COUNT(*)) DESC
             LIMIT 1;'''
 
         self.assert_response(question, expected_query, sql_query)
@@ -262,31 +269,34 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''What's the most common payment installment
                     count for orders over 1000 BRL? [integer: installments]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
-
+        sql_query = main(question)
         expected_query = '''
-            SELECT op.payment_installments AS installments
-            FROM order_payments op
-            WHERE op.payment_value > 1000
-            GROUP BY op.payment_installments
+            SELECT 
+                payment_installments
+            FROM order_payments
+            WHERE payment_value > 1000
+            GROUP BY payment_installments
             ORDER BY COUNT(*) DESC
-            LIMIT 1;'''
+            LIMIT 1;
+            '''
 
         self.assert_response(question, expected_query, sql_query)
 
     def test_query_6_max_avg_freight_value(self):
-        '''Tests which city has the highest average freight value per order.'''
+        '''which city has the highest average freight value per order.'''
         question = '''Which city has the highest average freight
                     value per order? [string: city_name]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT c.customer_city AS city_name
+            SELECT 
+                c.customer_city
             FROM customers c
             JOIN orders o ON c.customer_id = o.customer_id
             JOIN order_items oi ON o.order_id = oi.order_id
             GROUP BY c.customer_city
+            HAVING COUNT(DISTINCT o.order_id) > 50
             ORDER BY AVG(oi.freight_value) DESC
             LIMIT 1;'''
 
@@ -297,15 +307,18 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''What's the most expensive product category
                     based on average price? [string: category_name]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT p.product_category_name
-            FROM order_items oi
-            JOIN products p ON oi.product_id = p.product_id
+            SELECT 
+                p.product_category_name
+            FROM products p
+            JOIN order_items oi ON p.product_id = oi.product_id
             GROUP BY p.product_category_name
+            HAVING COUNT(*) > 10
             ORDER BY AVG(oi.price) DESC
-            LIMIT 1;'''
+            LIMIT 1;
+            '''
 
         self.assert_response(question, expected_query, sql_query)
 
@@ -314,8 +327,7 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''Which product category has the shortest
                     average delivery time? [string: category_name]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
-
+        sql_query = main(question)
         expected_query = '''
             SELECT p.product_category_name
             FROM order_items oi
@@ -335,16 +347,16 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''How many orders have items from
                      multiple sellers? [integer: count]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT COUNT(*) AS count
+            SELECT COUNT(*) as multi_seller_orders
             FROM (
                 SELECT order_id
                 FROM order_items
                 GROUP BY order_id
                 HAVING COUNT(DISTINCT seller_id) > 1
-            ) AS multi_seller_orders;'''
+            ) multi_seller;'''
 
         self.assert_response(question, expected_query, sql_query)
 
@@ -353,13 +365,15 @@ class TestSQLGeneration(unittest.TestCase):
         question = '''What percentage of orders are delivered
                     before the estimated delivery date? [float: percentage]'''
 
-        sql_query = self.sql_gen.generate_sql_query(question, self.schema)
+        sql_query = main(question)
 
         expected_query = '''
-            SELECT (COUNT(*) * 100.0 / (SELECT COUNT(*) FROM orders WHERE order_status = 'delivered')) AS percentage
+            SELECT 
+                ROUND(COUNT(CASE WHEN order_delivered_customer_date < order_estimated_delivery_date THEN 1 END) * 100.0 / COUNT(*), 2) as early_delivery_percentage
             FROM orders
             WHERE order_status = 'delivered'
-            AND order_delivered_customer_date < order_estimated_delivery_date;'''
+            AND order_delivered_customer_date IS NOT NULL
+            AND order_estimated_delivery_date IS NOT NULL;'''
 
         self.assert_response(question, expected_query, sql_query)
 

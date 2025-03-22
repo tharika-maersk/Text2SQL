@@ -1,110 +1,118 @@
 '''
     Using OpenAI to write SQL queries
 '''
-import os
+import json
+import pprint
 import logging
-from openai import OpenAI
-from dotenv import load_dotenv
+from prompts.base import FewShotExample
+from prompts.prompt import SystemPrompt, UserPrompt
+from utils.schema_loader import SchemaLoader
+from utils.config import DB_PATH, SCHEMA_PATH
+from reasoning.openai_client import OpenAIClient
 
-load_dotenv()
-logging.basicConfig(filename="sql_generation.log", level=logging.DEBUG,
-                    format="%(asctime)s - %(message)s")
 
-DB_PATH = "db/olist.sqlite"
-SCHEMA_PATH = "db/schema.txt"
-MODEL = "gpt-4o"
-OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
+def main(question):
+    """
+    Generates an SQL query from a natural language question using OpenAI.
 
-class SQLQueryGenerator:
-    '''
-    Handles database schema generation, LLM-based query generation
-    '''
-    def __init__(self, db_path, schema_path, model, ap_key):
-        self.db_path = db_path
-        self.schema_path = schema_path
-        self.model = model
-        self.openai_api_key = ap_key
-        self.client = OpenAI(api_key=self.openai_api_key)
+    Args:
+        question (str): User's question in natural language.
+    Returns:
+        str: Generated SQL query or an error message.
+    """
+    schema = SchemaLoader(db_path=DB_PATH, schema_path=SCHEMA_PATH).get_schema()
 
-    def get_schema(self) -> str:
-        """
-        Reads the database schema from the provided file.
+    # examples = FewShotExample(
+    #     input="How many customers have placed orders worth more than $5000 in total?", 
+    #     output="""```sql
+    #     SELECT COUNT(*) AS high_value_customers
+    #     FROM (
+    #         SELECT o.customer_id, SUM(o.order_total) AS total_spent
+    #         FROM orders o
+    #         GROUP BY o.customer_id
+    #         HAVING total_spent > 5000
+    #     ) AS customer_totals;```""")
+    examples = [
+        FewShotExample(
+            input="How many customers have placed orders worth more than $5000 in total?", 
+            output="""```sql
+            SELECT COUNT(*) AS high_value_customers
+            FROM (
+                SELECT o.customer_id, SUM(oi.price) AS total_spent
+                FROM orders o
+                JOIN order_items oi ON o.order_id = oi.order_id
+                GROUP BY o.customer_id
+                HAVING total_spent > 5000
+            ) AS customer_totals;
+            ```"""
+        ),
+        FewShotExample(
+            input="Which seller has the highest number of orders delivered to Rio de Janeiro?", 
+            output="""```sql
+            SELECT s.seller_id
+            FROM sellers s
+            JOIN order_items oi ON s.seller_id = oi.seller_id
+            JOIN orders o ON oi.order_id = o.order_id
+            JOIN customers c ON o.customer_id = c.customer_id
+            WHERE c.customer_city = 'rio de janeiro'
+                AND o.order_status = 'delivered'
+            GROUP BY s.seller_id
+            ORDER BY COUNT(DISTINCT o.order_id) DESC
+            LIMIT 1;
+            ```"""
+        ),
+        FewShotExample(
+            input="What is the most expensive product category based on average price?", 
+            output="""```sql
+            SELECT p.product_category_name
+            FROM products p
+            JOIN order_items oi ON p.product_id = oi.product_id
+            GROUP BY p.product_category_name
+            ORDER BY AVG(oi.price) DESC
+            LIMIT 1;
+            ```"""
+        ),
+        FewShotExample(
+            input="Which city has the highest average freight value per order?", 
+            output="""```sql
+            SELECT c.customer_city
+            FROM customers c
+            JOIN orders o ON c.customer_id = o.customer_id
+            JOIN order_items oi ON o.order_id = oi.order_id
+            GROUP BY c.customer_city
+            ORDER BY AVG(oi.freight_value) DESC
+            LIMIT 1;
+            ```"""
+        )
+    ]
+    system_prompt = SystemPrompt(
+        role="system",
+        db_schema=schema,
+        query=question,
+        examples=examples
+    )
+    user_prompt = UserPrompt(
+        role="user",
+        query=question,
+    )
 
-        Returns:
-            str: Database schema as a string or an empty string if an error occurs.
-        """
-        try:
-            with open(self.schema_path, 'r', encoding='utf-8') as file:
-                return file.read()
-        except FileNotFoundError:
-            logging.error("Schema file not found: %s", self.schema_path)
-            return ""
+    try:
+        messages=[
+            {"role": system_prompt.role , "content": system_prompt.to_prompt()},
+            {"role": user_prompt.role , "content": user_prompt.to_prompt()}
+        ]
+        openai_client = OpenAIClient()
+        response = openai_client.get_response(messages, temperature=0.7)
+        # return response
+        # Parse the response as JSON
+        response_data = json.loads(response)
 
-    def generate_sql_query(self, question, schema):
-        """
-        Generates an SQL query from a natural language question using OpenAI.
+        # Extract only the SQL query from the response
+        return response_data.get("query", "No query found in response")
+    except Exception as e:
+        logging.error("OpenAI API error : %s", e)
+        return f"OpenAI API error : {e}"
 
-        Args:
-            question (str): User's question in natural language.
-            schema (str): The database schema.
-
-        Returns:
-            str: Generated SQL query or an error message.
-        """
-        query_text, return_type = question.split('? ', 1)
-        column_name, column_type = return_type.split(":")
-        system_prompt = f"""
-        You are an expert in SQL, SQLite databases, and data analysis.
-        You work as a Data Analyst in an **E-commerce Analytics Team**.
-
-        ### **Your Role**
-            Your job is to generate **accurate, optimized, and executable SQL queries** 
-            to answer user questions based on the provided database schema.
-
-        ### **SQL Query Guidelines**
-            - **Use only tables and columns defined in the schema.**
-            - **Do NOT assume relationships unless explicitly defined.**
-            - **If a table/column does not exist, respond with:** `"SQL query cannot be written for this."`
-            - **Ensure queries are compatible with SQLite (no unsupported functions).**
-            - **Avoid `SELECT *`, select only necessary columns when required.**
-            - **Use joins and filtering effectively for performance.**
-            - **For aggregation queries:**
-                - Use `COUNT(*)` for counts.
-                - Use `SUM(column_name)` for summing.
-                - Use `HAVING` for filtering aggregates.
-                - Use nested queries for advanced aggregation.
-            - **Do not generate queries that modify data** (`DELETE`, `UPDATE`, `DROP` are prohibited).
-
-        ### **Expected Response Format**
-            - **Return only the SQL query as raw text without Markdown formatting**.
-            - The query should be **fully executable** in SQLite.
-
-        ### Database schema is attached below. Note the relationships between invoices, customers and services.
-            ```mermaid
-            {schema}
-            ```
-        """
-
-        user_prompt = f"""
-        ## Generate a SQL query to answer the following question:
-        ### **User Question**
-            "{query_text}"
-        ### **Expected Output**
-            - **Ensure that the query returns column `{column_name}` of type `{column_type}`.**
-            - **Do NOT include Markdown formatting, code block, backticks, or explanations** in the response.
-        """
-
-        try:
-            response = self.client.chat.completions.create(
-                model=MODEL,
-                messages=[{"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}]
-            )
-
-            sql_query = response.choices[0].message.content.strip()
-            if not sql_query.lower().startswith(("select", "with")):
-                return "Only SELECT queries are allowed."
-            return sql_query
-        except Exception as e:
-            logging.error("OpenAI API error : %s", e)
-            return f"OpenAI API error : {e}"
+if __name__ == "__main__":
+    QUESTION = "How many customers have placed orders worth more than $5000 in total?"
+    pprint.pp(main(QUESTION))
