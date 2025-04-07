@@ -47,7 +47,7 @@ class TestSQLGeneration(unittest.TestCase):
         plt.ylim(0, 5)
 
         # Save the plot
-        plt.savefig("results/relevancy_scores_new.png")
+        plt.savefig("results/relevancy_scores.png")
         plt.show()
 
     def check_sql_syntax(self, query):

@@ -27,12 +27,12 @@ def main(question):
     system_prompt = SystemPrompt(
         role="system",
         db_schema=schema,
-        query=question,
+        query=question.lower(),
         examples=few_shot_examples
     )
     user_prompt = UserPrompt(
         role="user",
-        query=question,
+        query=question.lower(),
     )
 
     logger.info("System Prompt: %s", system_prompt.to_prompt())
