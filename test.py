@@ -3,15 +3,11 @@ Unit test for SQLQueryGenerator
 '''
 import unittest
 import sqlite3
-import logging
 import matplotlib.pyplot as plt
-from openai import OpenAI
+from reasoning.openai_client import OpenAIClient
 from main import main
-from utils.config import DB_PATH, SCHEMA_PATH, OPENAI_API_KEY
+from utils.config import DB_PATH, SCHEMA_PATH, logger
 from utils.schema_loader import SchemaLoader
-
-logging.basicConfig(filename="sql_generation.log", level=logging.ERROR,
-                    format="%(asctime)s - %(message)s")
 
 class TestSQLGeneration(unittest.TestCase):
     '''
@@ -25,12 +21,11 @@ class TestSQLGeneration(unittest.TestCase):
         Sets up the SQLQueryGenerator, database connection, 
         schema, cursor, and OpenAI API client.
         '''
-        # cls.sql_gen = SQLQueryGenerator(DB_PATH, SCHEMA_PATH, MODEL, OPENAI_API_KEY)
         cls.connector = sqlite3.connect(DB_PATH)
         cls.shehma_loader = SchemaLoader(DB_PATH, SCHEMA_PATH)
         cls.schema = cls.shehma_loader.get_schema()
         cls.cursor = cls.connector.cursor()
-        cls.client = OpenAI(api_key=OPENAI_API_KEY)
+        cls.test_client = OpenAIClient()
         cls.evaluation_results = []
 
     @classmethod
@@ -52,7 +47,7 @@ class TestSQLGeneration(unittest.TestCase):
         plt.ylim(0, 5)
 
         # Save the plot
-        plt.savefig("./results/relevancy_scores.png")
+        plt.savefig("results/relevancy_scores_new.png")
         plt.show()
 
     def check_sql_syntax(self, query):
@@ -69,8 +64,8 @@ class TestSQLGeneration(unittest.TestCase):
             self.cursor.execute(f"EXPLAIN {query}")
             return True
         except sqlite3.Error as e:
-            logging.error("SQL Syntax Error: %s", e)
-            logging.error("Invalid Query: %s", query)
+            logger.error("SQL Syntax Error: %s", e)
+            logger.error("Invalid Query: %s", query)
             return False
 
     def assert_response(self, question, expected_query, gen_query):
@@ -106,15 +101,15 @@ class TestSQLGeneration(unittest.TestCase):
                                        places=1,
                                        msg=f"Query results differ for question: {question}")
             else:
-                logging.info("\nQuery generated for:%s\n%s", question, gen_query)
-                logging.info("Query Response: %s\n", obtained_result)
+                logger.info("\nQuery generated for:%s\n%s", question, gen_query)
+                logger.info("Query Response: %s\n", obtained_result)
                 self.assertEqual(expected_result,
                                  obtained_result,
                                  f"Query results differ for question: {question}")
 
         except sqlite3.Error as e:
-            logging.error("Database Execution Error: %s", e)
-            logging.error("Problem with query: %s", gen_query)
+            logger.error("Database Execution Error: %s", e)
+            logger.error("Problem with query: %s", gen_query)
             self.fail(f"Query execution failed for question: {question}")
 
     def check_relevance_score(self, request: str, query: str, metric_name: str):
@@ -174,7 +169,7 @@ class TestSQLGeneration(unittest.TestCase):
             query=query,
             metric_name=metric_name,
         )
-        response = self.client.chat.completions.create(
+        response = self.test_client.client.chat.completions.create(
             model=evaluation_model,
             messages=[{"role": "user", "content": prompt}],
             temperature=0,
