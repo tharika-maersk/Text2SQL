@@ -4,6 +4,7 @@ This module contains Pydantic models for the SQL query generation prompt.
 from typing import List
 from pydantic import Field
 from prompts.base import BasePrompt, FewShotExample
+from reasoning.response_fromatter import QueryProcessor
 
 class SystemPrompt(BasePrompt):
     """
@@ -24,7 +25,7 @@ class SystemPrompt(BasePrompt):
     examples: List[FewShotExample] = []
     db_schema: str = Field(description="The database schema in Mermaid format.")
 
-    def to_prompt(self):
+    def to_prompt(self, portugese_category_translation) -> str:
         """
         This method constructs a detailed system prompt that includes the role of the model,
         guidelines for SQL query generation, and a few-shot example section.
@@ -71,6 +72,9 @@ class SystemPrompt(BasePrompt):
             ```mermaid
             {self.db_schema}
             ```
+        ### **Product Category Translation**
+            If there are product category translations in {portugese_category_translation},
+            then use the exact Portuguese name in the SQL query.
         ---
         ### **Here are some examples**: 
             {few_shot_examples}

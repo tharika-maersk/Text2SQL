@@ -19,7 +19,7 @@ class Step(BaseModel):
     explanation: str = Field(description="The reasoning behind the SQL generation.")
     output: str = Field(description="The SQL query generated at this step.")
 
-class SQLGeneration(BaseModel):
+class SQLGenerator(BaseModel):
     """
     Represents the SQL query generation task.
 
@@ -32,3 +32,23 @@ class SQLGeneration(BaseModel):
     """
     steps: List[Step] = Field(description="Short reasoning steps explaining the approach")
     query: str = Field(description="The final SQL query generated (PostgreSQL syntax)")
+
+class QueryProcessor(BaseModel):
+    """
+    Represents a query expansion for the SQL query generation task.
+
+    Attributes
+    ----------
+    query : str
+        The input query.
+    expanded_query : str
+        The expected expanded SQL query output.
+
+    Methods
+    -------
+    render()
+        Returns the query expansion as a string.
+    """
+    query: str = Field(description="The original user query")
+    expanded_query: str  = Field(description="Expanded category terms in Portuguese")
+    explanation: str = Field(description="Explanation for the query expansion.")

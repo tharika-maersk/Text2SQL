@@ -22,30 +22,37 @@ def main(question):
     -------
         str: Generated SQL query or an error message.
     """
-    schema = SchemaLoader(db_path=DB_PATH, schema_path=SCHEMA_PATH).get_schema()
+    schema = SchemaLoader(db_path=DB_PATH, schema_path=SCHEMA_PATH)
     few_shot_examples = DefineFewShotExamples().get_few_shot_prompts()
     system_prompt = SystemPrompt(
         role="system",
-        db_schema=schema,
+        db_schema=schema.get_schema(),
         query=question.lower(),
-        examples=few_shot_examples
+        examples=few_shot_examples,
+        portugese_category_translation=schema.read_product_categories(),
     )
     user_prompt = UserPrompt(
         role="user",
         query=question.lower(),
     )
 
-    logger.info("System Prompt: %s", system_prompt.to_prompt())
-    logger.info("User Prompt: %s", user_prompt.to_prompt())
+
 
     try:
+        openai_client = OpenAIClient()
+        product_translation = openai_client.expand_and_translate_categories(question.lower(),
+                                                      schema.read_product_categories(),
+                                                      temperature=0.3)
+        logger.info("Product Translation: %s", product_translation)
+        
         messages=[
-            {"role": system_prompt.role , "content": system_prompt.to_prompt()},
+            {"role": system_prompt.role , "content": system_prompt.to_prompt(product_translation)},
             {"role": user_prompt.role , "content": user_prompt.to_prompt()}
         ]
-        openai_client = OpenAIClient()
+
         response = openai_client.get_response(messages, temperature=0.7)
         logger.info("Response from OpenAI: %s", response)
+
         # Parse the response as JSON
         response_data = json.loads(response)
 

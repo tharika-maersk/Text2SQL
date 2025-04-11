@@ -4,7 +4,7 @@ This module provides a client for interacting with the Azure OpenAI API.
 import openai
 from openai import AzureOpenAI
 from utils.config import OPENAI_API_KEY, MODEL, logger, azure_endpoint, azure_openai_api_version
-from reasoning.response_fromatter import SQLGeneration
+from reasoning.response_fromatter import SQLGenerator, QueryProcessor
 
 class OpenAIClient:
     """
@@ -38,6 +38,49 @@ class OpenAIClient:
             api_version=azure_openai_api_version
         )
 
+
+    def get_feedback(self):
+        pass
+
+    def expand_and_translate_categories(self, query, product_categories, temperature=0.3):
+        """
+        Expands and translates product categories in the SQL query.
+        
+        Parameters
+        ----------
+        query : str
+            The SQL query to be expanded and translated.
+        product_categories : dict
+            A dictionary of product categories and their translations.
+
+        Returns
+        -------
+        str
+            The expanded and translated SQL query.
+        """
+        system_prompt = f'''You are an assistant that maps English Product category names
+                        to exact Portuguese database category names. 
+                        Database categories include: {product_categories} where the key
+                        is the English name and the value is the Portuguese name.
+                        For each English category name, provide the exact Portuguese 
+                        name and explain why.
+                        Respond with "This query does not contain any product categories to expand." 
+                        if there are no product categories in the query.'''
+        user_prompt = f'''Identify the product categories in the query and
+                        expand them to their exact Portuguese names. \n\nQuery: {query}'''
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        logger.info("Sending request to OpenAI API with messages: %s", messages)
+        response = self.client.beta.chat.completions.parse(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            response_format=QueryProcessor
+        )
+        return response.choices[0].message.content.strip()
+
     def get_response(self, messages, temperature=0.7):
         """
         Sends a request to the OpenAI API with the provided messages and temperature.
@@ -61,7 +104,7 @@ class OpenAIClient:
                 model=self.model,
                 messages=messages,
                 temperature=temperature,
-                response_format=SQLGeneration
+                response_format=SQLGenerator
             )
             sql_query = response.choices[0].message.content.strip()
             # if not sql_query.lower().startswith(("select", "with")):
