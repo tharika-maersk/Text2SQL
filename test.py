@@ -61,6 +61,7 @@ class TestSQLGeneration(unittest.TestCase):
             bool: True if the query is syntactically correct, False otherwise.
         '''
         try:
+            logger.info("Checking SQL syntax for query: %s", query)
             self.cursor.execute(f"EXPLAIN {query}")
             return True
         except sqlite3.Error as e:

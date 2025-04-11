@@ -157,10 +157,12 @@ class DefineFewShotExamples():
             FewShotExample(
                 input="What is the most expensive product category based on average price?",
                 output="""```sql
-                SELECT p.product_category_name
+                SELECT 
+                    p.product_category_name
                 FROM products p
                 JOIN order_items oi ON p.product_id = oi.product_id
                 GROUP BY p.product_category_name
+                HAVING COUNT(*) > 10
                 ORDER BY AVG(oi.price) DESC
                 LIMIT 1;
                 ```"""
@@ -168,13 +170,14 @@ class DefineFewShotExamples():
             FewShotExample(
                 input="Which city has the highest average freight value per order?",
                 output="""```sql
-                SELECT c.customer_city
+                SELECT 
+                    c.customer_city
                 FROM customers c
                 JOIN orders o ON c.customer_id = o.customer_id
                 JOIN order_items oi ON o.order_id = oi.order_id
                 GROUP BY c.customer_city
+                HAVING COUNT(DISTINCT o.order_id) > 50
                 ORDER BY AVG(oi.freight_value) DESC
-                LIMIT 1;
-                ```"""
+                LIMIT 1;```"""
             )
         ]

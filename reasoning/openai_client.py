@@ -79,7 +79,7 @@ class OpenAIClient:
             temperature=temperature,
             response_format=QueryProcessor
         )
-        return response.choices[0].message.content.strip()
+        return response.choices[0].message.parsed
 
     def get_response(self, messages, temperature=0.7):
         """

@@ -50,7 +50,10 @@ class SchemaLoader:
                 cursor = sqlite3_conn.cursor()
                 cursor.execute("SELECT * FROM product_category_name_translation")
                 product_categories = {row[1]: row[0] for row in cursor.fetchall()}
-            return product_categories
+                return product_categories
         except FileNotFoundError:
             logger.error("Database file not found: %s", self.db_path)
             return []
+        finally:
+            if sqlite3_conn:
+                sqlite3_conn.close()
