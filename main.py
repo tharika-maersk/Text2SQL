@@ -6,9 +6,10 @@ import pprint
 import openai
 from prompts.prompt import SystemPrompt, UserPrompt, DefineFewShotExamples
 from utils.schema_loader import SchemaLoader
-from utils.config import DB_PATH, SCHEMA_PATH, logger
+from utils.config import DB_PATH, SCHEMA_PATH, setup_logger
 from reasoning.openai_client import OpenAIClient
 
+logger = setup_logger(__name__)
 
 def main(question):
     """
@@ -35,22 +36,36 @@ def main(question):
         role="user",
         query=question.lower(),
     )
-
-
-
     try:
         openai_client = OpenAIClient()
         product_translation = openai_client.expand_and_translate_categories(question.lower(),
                                                       schema.read_product_categories(),
                                                       temperature=0.3)
         logger.info("Product Translation: %s", product_translation)
-        
+
         messages=[
-            {"role": system_prompt.role , "content": system_prompt.to_prompt(product_translation)},
-            {"role": user_prompt.role , "content": user_prompt.to_prompt()}
+            {
+                "role": system_prompt.role ,
+                "content": system_prompt.to_prompt(product_translation.expanded_query)
+            },
+            {
+                "role": user_prompt.role ,
+                "content": user_prompt.to_prompt()
+            }
         ]
 
         response = openai_client.get_response(messages, temperature=0.7)
+        feedback = openai_client.get_feedback(question.lower(), response, temperature=0)
+        logger.info("Feedback: %s", feedback)
+        if feedback.score < 8:
+            logger.warning("Feedback score is low: %s", feedback.score)
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": feedback.feedback
+                }
+            )
+            response = openai_client.get_response(messages, temperature=0.7)
         logger.info("Response from OpenAI: %s", response)
 
         # Parse the response as JSON

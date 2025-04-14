@@ -6,8 +6,10 @@ import sqlite3
 import matplotlib.pyplot as plt
 from reasoning.openai_client import OpenAIClient
 from main import main
-from utils.config import DB_PATH, SCHEMA_PATH, logger
+from utils.config import DB_PATH, SCHEMA_PATH, setup_logger
 from utils.schema_loader import SchemaLoader
+
+logger = setup_logger(__name__)
 
 class TestSQLGeneration(unittest.TestCase):
     '''

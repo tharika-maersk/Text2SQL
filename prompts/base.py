@@ -1,6 +1,7 @@
 """
 This module contains the base classes for the prompt generation task.
 """
+from typing import Optional
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
@@ -24,7 +25,7 @@ class BasePrompt(BaseModel, ABC):
     query: str = Field(description="The user query.")
 
     @abstractmethod
-    def to_prompt(self):
+    def to_prompt(self, portugese_category_translation: Optional[str]=None):
         """
         Returns the prompt as a Markdown string.
         """

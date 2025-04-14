@@ -1,10 +1,9 @@
 """
 This module contains Pydantic models for the SQL query generation prompt.
 """
-from typing import List
+from typing import List, Optional
 from pydantic import Field
 from prompts.base import BasePrompt, FewShotExample
-from reasoning.response_fromatter import QueryProcessor
 
 class SystemPrompt(BasePrompt):
     """
@@ -25,7 +24,7 @@ class SystemPrompt(BasePrompt):
     examples: List[FewShotExample] = []
     db_schema: str = Field(description="The database schema in Mermaid format.")
 
-    def to_prompt(self, portugese_category_translation) -> str:
+    def to_prompt(self, portugese_category_translation: Optional[str]=None) -> str:
         """
         This method constructs a detailed system prompt that includes the role of the model,
         guidelines for SQL query generation, and a few-shot example section.
@@ -57,10 +56,15 @@ class SystemPrompt(BasePrompt):
             - **Ensure queries are compatible with SQLite (no unsupported functions).**
             - **Avoid `SELECT *`, select only necessary columns when required.**
             - **Use joins and filtering effectively for performance.**
-            - **For aggregation queries:**
-                - Use `COUNT(*)` for counts.
-                - Use `SUM(column_name)` for summing.
-                - Use `HAVING` for filtering aggregates.
+            - When calculating the percentage of a condition (e.g. % of 5-star reviews), use:
+                (COUNT(CASE WHEN condition THEN 1 END) * 100.0 / COUNT(*))
+            - Apply filters like `HAVING COUNT(*) > 100` to ensure statistical significance.
+            - Return only the column(s) specified in the expected output format.
+            - If the question says "[integer: installment count]", only include that field.
+            - Do NOT include helper metrics like COUNT, unless explicitly requested.
+            - When comparing group-level averages (e.g. average freight per city), use:
+                - GROUP BY
+                - HAVING COUNT(...) to filter out low-volume entries
             - **Use nested queries for advanced aggregation.**
             - **Do not generate queries that modify data** (`DELETE`, `UPDATE`, `DROP` are prohibited).
 
@@ -98,7 +102,7 @@ class UserPrompt(BasePrompt):
     to_prompt() -> str
         Returns the user prompt as a Markdown string.
     """
-    def to_prompt(self) -> str:
+    def to_prompt(self, portugese_category_translation: Optional[str]=None) -> str:
         """
         Returns the user prompt as a Markdown string.
         """
@@ -179,5 +183,18 @@ class DefineFewShotExamples():
                 HAVING COUNT(DISTINCT o.order_id) > 50
                 ORDER BY AVG(oi.freight_value) DESC
                 LIMIT 1;```"""
-            )
+            ),
+            FewShotExample(
+                input="Which product category has the highest percentage of 5-star reviews?",
+                output="""```sql
+                SELECT          
+                    p.product_category_name   
+                FROM products p     
+                JOIN order_items oi ON p.product_id = oi.product_id     
+                JOIN order_reviews r ON oi.order_id = r.order_id     
+                GROUP BY p.product_category_name     
+                HAVING COUNT(*) > 100     
+                ORDER BY (COUNT(CASE WHEN r.review_score = 5 THEN 1 END) * 100.0 / COUNT(*)) DESC     
+                LIMIT 1;```"""
+            ),
         ]

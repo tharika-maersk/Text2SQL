@@ -3,8 +3,10 @@ This module provides a client for interacting with the Azure OpenAI API.
 """
 import openai
 from openai import AzureOpenAI
-from utils.config import OPENAI_API_KEY, MODEL, logger, azure_endpoint, azure_openai_api_version
-from reasoning.response_fromatter import SQLGenerator, QueryProcessor
+from utils.config import OPENAI_API_KEY, MODEL, setup_logger, azure_endpoint, azure_openai_api_version
+from reasoning.response_fromatter import SQLGenerator, QueryProcessor, FeedbackGenerator
+
+logger = setup_logger(__name__)
 
 class OpenAIClient:
     """
@@ -39,8 +41,46 @@ class OpenAIClient:
         )
 
 
-    def get_feedback(self):
-        pass
+    def get_feedback(self, user_query, sql_query, temperature=0):
+        '''
+        Generates feedback for the SQL query based on the user query.
+        Parameters
+        ----------
+        user_query : str
+            The user's question in natural language.
+        sql_query : str
+            The SQL query generated from the user's question.
+        temperature : float
+            The temperature parameter for the OpenAI API,
+            which controls the randomness of the output.
+        Returns
+        -------
+        dict
+            The feedback on the SQL query, including a score and suggestions for improvement.
+        '''
+        system_prompt = '''You are an **expert** SQL developer who is phenomenal at
+                        identifying errors in a SQL query.
+                        You are given a SQL query and the user question below :
+                        You need to  score the query based on the following metrics:
+                            - Correctness / Accuracy
+                            - Completeness
+                            - Clarity
+                        The score should be between 0 and 10.
+                        Provide feedback on how the query can be improved.'''
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": f'''
+            user question: {user_query}
+            This is the SQL query generated:{sql_query}'''}
+        ]
+        response = self.client.beta.chat.completions.parse(
+            model=self.model,
+            messages=messages,
+            temperature=temperature,
+            response_format=FeedbackGenerator
+        )
+        return response.choices[0].message.parsed
+
 
     def expand_and_translate_categories(self, query, product_categories, temperature=0.3):
         """
@@ -72,7 +112,6 @@ class OpenAIClient:
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ]
-        logger.info("Sending request to OpenAI API with messages: %s", messages)
         response = self.client.beta.chat.completions.parse(
             model=self.model,
             messages=messages,

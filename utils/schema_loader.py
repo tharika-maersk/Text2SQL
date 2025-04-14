@@ -2,7 +2,9 @@
     This class is responsible for reading the database schema from a specified file.
 '''
 import sqlite3
-from utils.config import logger
+from utils.config import setup_logger
+
+logger = setup_logger(__name__)
 
 class SchemaLoader:
     '''

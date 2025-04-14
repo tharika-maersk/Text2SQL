@@ -43,6 +43,8 @@ class QueryProcessor(BaseModel):
         The input query.
     expanded_query : str
         The expected expanded SQL query output.
+    explanation : str
+        The reasoning behind the query expansion.
 
     Methods
     -------
@@ -52,3 +54,22 @@ class QueryProcessor(BaseModel):
     query: str = Field(description="The original user query")
     expanded_query: str  = Field(description="Expanded category terms in Portuguese")
     explanation: str = Field(description="Explanation for the query expansion.")
+
+class FeedbackGenerator(BaseModel):
+    """
+    Represents the feedback generation for the SQL query generation task.
+
+    Attributes
+    ----------
+    score : int
+        The score given for the query generated based on the task.
+    feedback : str
+        The feedback provided by the user.
+
+    Methods
+    -------
+    render()
+        Returns the feedback as a string.
+    """
+    score: int = Field(description="Score for the feedback (0-10). The metrics for the score are: correctness / accuracy, completeness, and clarity.")
+    feedback: str = Field(description="Feedback from the model on the generated SQL query. The feedback should be in the form of a list of points and should highlight how the score can be improved i.e by ensuring correctness , clarity and completeness.")
